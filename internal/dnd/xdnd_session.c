@@ -242,10 +242,13 @@ void xdnd_start_drag(Display *dpy, Window src, char **uris, int n_uris) {
     XSync(dpy, False);
 
     // Grab pointer with a drag cursor for OS feedback.
-    // owner_events=True matches dragon.c: pointer events continue to be
-    // delivered to the normal windows while also being copied to us.
+    // owner_events=False so Gio's own window does NOT receive duplicate
+    // pointer events on the same Display; the grab owns them exclusively.
+    // Events not part of the Xdnd protocol are stashed below and replayed
+    // with XPutBackEvent before returning, so Gio's event pump never loses
+    // them and the every-other-drag state corruption is eliminated.
     Cursor drag_cursor = XCreateFontCursor(dpy, XC_fleur);
-    int ret = XGrabPointer(dpy, src, True,
+    int ret = XGrabPointer(dpy, src, False,
                             ButtonReleaseMask | PointerMotionMask,
                             GrabModeAsync, GrabModeAsync,
                             None, drag_cursor, CurrentTime);
@@ -261,6 +264,11 @@ void xdnd_start_drag(Display *dpy, Window src, char **uris, int n_uris) {
     int accepted = 0;
     int drop_sent = 0;
     long long drop_deadline = 0;
+
+    // Stash non-Xdnd events and replay them before returning so Gio's
+    // own event pump never sees its events silently consumed.
+    XEvent stash[64];
+    int n_stash = 0;
 
     XEvent ev;
     while (1) {
@@ -330,9 +338,7 @@ void xdnd_start_drag(Display *dpy, Window src, char **uris, int n_uris) {
                 if (target)
                     send_client_msg(dpy, target, atoms[A_XdndLeave],
                                     (long)src, 0, 0, 0, 0);
-                XUngrabPointer(dpy, CurrentTime);
-                XFreeCursor(dpy, drag_cursor);
-                return;
+                goto done;
             }
             break;
         case SelectionRequest:
@@ -345,15 +351,19 @@ void xdnd_start_drag(Display *dpy, Window src, char **uris, int n_uris) {
                         accepted, ev.xclient.data.l[4]);
             } else if (ev.xclient.message_type == atoms[A_XdndFinished]) {
                 fprintf(stderr, "zen-dragon: XdndFinished received\n");
-                XUngrabPointer(dpy, CurrentTime);
-                XFreeCursor(dpy, drag_cursor);
-                return;
+                goto done;
             }
+            break;
+        default:
+            if (n_stash < 64)
+                stash[n_stash++] = ev;
             break;
         }
     }
 
-    // Timeout / cleanup path
+done:
     XUngrabPointer(dpy, CurrentTime);
     XFreeCursor(dpy, drag_cursor);
+    for (int i = n_stash - 1; i >= 0; i--)
+        XPutBackEvent(dpy, &stash[i]);
 }

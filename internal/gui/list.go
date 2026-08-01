@@ -87,20 +87,28 @@ func (s *UIState) processRowDrag(gtx C, row *FileRow) {
 					dy = -dy
 				}
 				if dy >= dragThreshold && s.X11Window != 0 && s.X11Display != nil && !dragActive {
-					dragCtx.Pressed = false
-					dragCtx.Dragged = true
-					dragActive = true
-					uris := s.CheckedURIs()
-					if len(uris) == 0 {
-						uris = []string{"file://" + row.Result.Path}
-					}
-					os.Stderr.WriteString("zen-dragon: starting XDnD drag with " + itoa(len(uris)) + " files\n")
-					// Synchronous on Gio's own connection: blocks the frame
-					// loop for the duration of the drag (modal, like dragon).
-					dnd.StartDrag(s.X11Display, s.X11Window, uris)
-					dragActive = false
+				dragCtx.Pressed = false
+				dragCtx.Dragged = true
+				dragActive = true
+				uris := s.CheckedURIs()
+				if len(uris) == 0 {
+					uris = []string{"file://" + row.Result.Path}
 				}
+				os.Stderr.WriteString("zen-dragon: starting XDnD drag with " + itoa(len(uris)) + " files\n")
+				// Synchronous on Gio's own connection: blocks the frame
+				// loop for the duration of the drag (modal, like dragon).
+				dnd.StartDrag(s.X11Display, s.X11Window, uris)
+				dragActive = false
+				// Hard-reset both Gio's gesture state and our own bookkeeping.
+				// The C side now replays foreign events via XPutBackEvent, but
+				// gesture.Drag may still hold a stale pointer-tag from the
+				// pre-drag Press that survived the XDnD session; clearing it
+				// here guarantees a clean slate on the next frame.
+				row.Drag = gesture.Drag{}
+				dragCtx = dragState{}
+				gtx.Execute(op.InvalidateCmd{})
 			}
+		}
 		case pointer.Release:
 			if dragCtx.Pressed && dragCtx.Tag == row && !dragCtx.Dragged {
 				row.Checkbox.Value = !row.Checkbox.Value
