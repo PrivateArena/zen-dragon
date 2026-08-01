@@ -81,6 +81,7 @@ func main() {
 			fmt.Fprintf(os.Stderr, "GUI error: %v\n", err)
 		}
 		cancel()
+		os.Exit(0)
 	}()
 
 	app.Main()
