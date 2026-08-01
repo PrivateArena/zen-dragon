@@ -5,7 +5,7 @@ package dnd
 #include <X11/Xlib.h>
 #include <stdlib.h>
 
-void xdnd_start_drag(Window src, char **uris, int n_uris);
+void xdnd_start_drag(Display *dpy, Window src, char **uris, int n_uris);
 */
 import "C"
 import (
@@ -24,9 +24,14 @@ func PathsToURIList(paths []string) string {
 	return b.String()
 }
 
-func StartDrag(x11Win uintptr, paths []string) {
+// StartDrag blocks until the drag finishes (drop, or cancel). Call it
+// synchronously from the goroutine that owns Gio's event loop — NOT as
+// `go dnd.StartDrag(...)`. It reuses Gio's own X connection (display),
+// which is required for XGrabPointer to succeed and for XDnD
+// ClientMessages/SelectionRequests to be delivered back to this process.
+func StartDrag(display unsafe.Pointer, x11Win uintptr, paths []string) {
 	n := len(paths)
-	if n == 0 {
+	if n == 0 || display == nil {
 		return
 	}
 
@@ -41,5 +46,5 @@ func StartDrag(x11Win uintptr, paths []string) {
 		}
 	}()
 
-	go C.xdnd_start_drag(C.Window(x11Win), &cUris[0], C.int(n))
+	C.xdnd_start_drag((*C.Display)(display), C.Window(x11Win), &cUris[0], C.int(n))
 }

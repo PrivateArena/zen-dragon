@@ -41,6 +41,7 @@ func RunUI(cfg *Config, results <-chan search.SearchResult) error {
 		case app.X11ViewEvent:
 			if e.Valid() {
 				state.X11Window = e.Window
+				state.X11Display = e.Display
 			}
 		case app.FrameEvent:
 			state.drainResults(results)

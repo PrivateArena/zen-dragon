@@ -2,8 +2,9 @@ package gui
 
 import (
 	"image"
+	"os"
 
-	"gioui.org/io/event"
+	"gioui.org/gesture"
 	"gioui.org/io/pointer"
 	"gioui.org/layout"
 	"gioui.org/op"
@@ -21,9 +22,11 @@ type dragState struct {
 	Tag     *FileRow
 	StartY  float32
 	Pressed bool
+	Dragged bool
 }
 
 var dragCtx dragState
+var dragActive bool
 
 func (s *UIState) LayoutResults(gtx C, th *material.Theme) D {
 	if s.Searching && len(s.Rows) == 0 {
@@ -48,55 +51,72 @@ func (s *UIState) LayoutRow(gtx C, th *material.Theme, i int) D {
 	}
 	row := &s.Rows[i]
 
-	// Hit area + event registration
-	area := clip.Rect(image.Rectangle{Max: gtx.Constraints.Min}).Push(gtx.Ops)
-	event.Op(gtx.Ops, row)
-	area.Pop()
+	// 1. Process drag events first (handler was registered in the previous frame)
+	s.processRowDrag(gtx, row)
 
-	// Process pointer events
+	// 2. Lay out the content, recording its ops
+	m := op.Record(gtx.Ops)
+	dims := s.layoutRowContent(gtx, th, row, i)
+	contentOps := m.Stop()
+
+	// 3. Register the drag source over the full row, then replay content on top
+	//    so buttons/checkbox (children) take pointer priority.
+	defer clip.Rect(image.Rectangle{Max: dims.Size}).Push(gtx.Ops).Pop()
+	row.Drag.Add(gtx.Ops)
+	contentOps.Add(gtx.Ops)
+
+	return dims
+}
+
+func (s *UIState) processRowDrag(gtx C, row *FileRow) {
 	for {
-		ev, ok := gtx.Event(pointer.Filter{
-			Target: row,
-			Kinds:  pointer.Press | pointer.Release | pointer.Move | pointer.Drag | pointer.Cancel,
-		})
+		ev, ok := row.Drag.Update(gtx.Metric, gtx.Source, gesture.Both)
 		if !ok {
 			break
 		}
-		if pe, ok := ev.(pointer.Event); ok {
-			switch pe.Kind {
-			case pointer.Press:
-				dragCtx.Tag = row
-				dragCtx.StartY = pe.Position.Y
-				dragCtx.Pressed = true
-			case pointer.Move, pointer.Drag:
-				if dragCtx.Pressed && dragCtx.Tag == row {
-					dy := pe.Position.Y - dragCtx.StartY
-					if dy < 0 {
-						dy = -dy
-					}
-					if dy >= dragThreshold && s.X11Window != 0 {
-						dragCtx.Pressed = false
-						dragCtx.Tag = nil
-						uris := s.CheckedURIs()
-						if len(uris) == 0 {
-							uris = []string{"file://" + row.Result.Path}
-						}
-						go dnd.StartDrag(s.X11Window, uris)
-					}
+		switch ev.Kind {
+		case pointer.Press:
+			dragCtx.Tag = row
+			dragCtx.StartY = ev.Position.Y
+			dragCtx.Pressed = true
+			dragCtx.Dragged = false
+		case pointer.Drag:
+			if dragCtx.Pressed && dragCtx.Tag == row {
+				dy := ev.Position.Y - dragCtx.StartY
+				if dy < 0 {
+					dy = -dy
 				}
-			case pointer.Release:
-				if dragCtx.Pressed && dragCtx.Tag == row {
-					row.Checkbox.Value = !row.Checkbox.Value
+				if dy >= dragThreshold && s.X11Window != 0 && s.X11Display != nil && !dragActive {
+					dragCtx.Pressed = false
+					dragCtx.Dragged = true
+					dragActive = true
+					uris := s.CheckedURIs()
+					if len(uris) == 0 {
+						uris = []string{"file://" + row.Result.Path}
+					}
+					os.Stderr.WriteString("zen-dragon: starting XDnD drag with " + itoa(len(uris)) + " files\n")
+					// Synchronous on Gio's own connection: blocks the frame
+					// loop for the duration of the drag (modal, like dragon).
+					dnd.StartDrag(s.X11Display, s.X11Window, uris)
+					dragActive = false
 				}
-				dragCtx.Pressed = false
-				dragCtx.Tag = nil
-			case pointer.Cancel:
-				dragCtx.Pressed = false
-				dragCtx.Tag = nil
 			}
+		case pointer.Release:
+			if dragCtx.Pressed && dragCtx.Tag == row && !dragCtx.Dragged {
+				row.Checkbox.Value = !row.Checkbox.Value
+			}
+			dragCtx.Pressed = false
+			dragCtx.Dragged = false
+			dragCtx.Tag = nil
+		case pointer.Cancel:
+			dragCtx.Pressed = false
+			dragCtx.Dragged = false
+			dragCtx.Tag = nil
 		}
 	}
+}
 
+func (s *UIState) layoutRowContent(gtx C, th *material.Theme, row *FileRow, i int) D {
 	return layout.Stack{}.Layout(gtx,
 		layout.Expanded(func(gtx C) D {
 			bg := nightRowBg

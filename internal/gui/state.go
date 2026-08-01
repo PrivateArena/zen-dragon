@@ -1,6 +1,9 @@
 package gui
 
 import (
+	"unsafe"
+
+	"gioui.org/gesture"
 	"gioui.org/layout"
 	"gioui.org/widget"
 	"zen-dragon/internal/search"
@@ -12,6 +15,7 @@ type FileRow struct {
 	CopyPath    widget.Clickable
 	CopyName    widget.Clickable
 	CopyContent widget.Clickable
+	Drag        gesture.Drag
 }
 
 type UIState struct {
@@ -22,7 +26,7 @@ type UIState struct {
 	Message    string
 	ClipText   string
 	X11Window  uintptr
-	X11Display uintptr
+	X11Display unsafe.Pointer
 }
 
 func NewUIState() *UIState {
