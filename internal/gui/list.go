@@ -4,7 +4,10 @@ import (
 	"image"
 	"os"
 
+	"zen-dragon/internal/dnd"
+
 	"gioui.org/gesture"
+	"gioui.org/io/event"
 	"gioui.org/io/pointer"
 	"gioui.org/layout"
 	"gioui.org/op"
@@ -13,10 +16,14 @@ import (
 	"gioui.org/unit"
 	"gioui.org/widget"
 	"gioui.org/widget/material"
-	"zen-dragon/internal/dnd"
 )
 
-const dragThreshold float32 = 15
+const (
+	dragThreshold      float32 = 15
+	defaultScrollSpeed         = 5.0
+)
+
+var cursorTag struct{}
 
 type dragState struct {
 	Tag     *FileRow
@@ -39,10 +46,145 @@ func (s *UIState) LayoutResults(gtx C, th *material.Theme) D {
 			return material.Body1(th, "No files found.").Layout(gtx)
 		})
 	}
+	if s.HoveredRow >= len(s.Rows) {
+		s.HoveredRow = -1
+	}
 
-	return s.ResultList.Layout(gtx, len(s.Rows), func(gtx C, i int) D {
-		return s.LayoutRow(gtx, th, i)
+	if s.ScrollSettling {
+		s.ScrollSettling = false
+		return s.listArea(gtx, th)
+	}
+
+	prevFirst := s.ResultList.Position.First
+	prevOffset := s.ResultList.Position.Offset
+	dims := s.listArea(gtx, th)
+	s.boostScroll(gtx, prevFirst, prevOffset)
+	return dims
+}
+
+func (s *UIState) listArea(gtx C, th *material.Theme) D {
+	return layout.Stack{}.Layout(gtx,
+		layout.Expanded(func(gtx C) D {
+			s.trackCursor(gtx)
+			return s.ResultList.Layout(gtx, len(s.Rows), func(gtx C, i int) D {
+				return s.LayoutRow(gtx, th, i)
+			})
+		}),
+		layout.Stacked(func(gtx C) D {
+			return s.layoutTooltip(gtx, th)
+		}),
+	)
+}
+
+func (s *UIState) boostScroll(gtx C, prevFirst, prevOffset int) {
+	m := s.ScrollSpeed
+	if m <= 0 {
+		m = defaultScrollSpeed
+	}
+	if m == 1.0 {
+		return
+	}
+	n := len(s.Rows)
+	pos := s.ResultList.Position
+	if n <= 0 || pos.Length <= 0 {
+		return
+	}
+	avg := float64(pos.Length) / float64(n)
+	d := float64(pos.First-prevFirst)*avg + float64(pos.Offset-prevOffset)
+	if d > -0.5 && d < 0.5 {
+		return
+	}
+	extra := d * (m - 1.0)
+	// Cap at remaining scrollable distance to avoid clamp bounce.
+	if d > 0 {
+		rem := float64(n-pos.First)*avg - float64(pos.Offset)
+		if extra > rem {
+			extra = rem
+		}
+	} else {
+		avail := float64(pos.First)*avg + float64(pos.Offset)
+		if -extra > avail {
+			extra = -avail
+		}
+	}
+	items := float32(extra / avg)
+	if items == 0 {
+		return
+	}
+	s.ResultList.ScrollBy(items)
+	s.ScrollSettling = true
+	gtx.Execute(op.InvalidateCmd{})
+}
+
+func (s *UIState) trackCursor(gtx C) {
+	st := clip.Rect{Max: gtx.Constraints.Max}.Push(gtx.Ops)
+	event.Op(gtx.Ops, &cursorTag)
+	st.Pop()
+
+	for {
+		ev, ok := gtx.Event(pointer.Filter{
+			Target: &cursorTag,
+			Kinds:  pointer.Move | pointer.Enter | pointer.Leave | pointer.Scroll,
+		})
+		if !ok {
+			break
+		}
+		e, ok := ev.(pointer.Event)
+		if !ok {
+			continue
+		}
+		switch e.Kind {
+		case pointer.Move, pointer.Enter:
+			s.CursorPos = image.Pt(int(e.Position.X), int(e.Position.Y))
+		case pointer.Leave, pointer.Cancel, pointer.Scroll:
+			s.HoveredRow = -1
+		}
+	}
+}
+
+func (s *UIState) layoutTooltip(gtx C, th *material.Theme) D {
+	if s.HoveredRow < 0 || s.HoveredRow >= len(s.Rows) {
+		return D{}
+	}
+	path := s.Rows[s.HoveredRow].Result.Path
+
+	const maxW = 480
+	pad := 6
+
+	lb := material.Label(th, unit.Sp(11), path)
+	lb.Color = nightButtonFg
+
+	cg := gtx
+	if cg.Constraints.Max.X > maxW {
+		cg.Constraints.Max.X = maxW
+	}
+	m := op.Record(gtx.Ops)
+	md := lb.Layout(cg)
+	labelOps := m.Stop()
+
+	w := md.Size.X + 2*pad
+	h := md.Size.Y + 2*pad
+	x := s.CursorPos.X + 12
+	y := s.CursorPos.Y - h - 4
+	if x+w > gtx.Constraints.Max.X {
+		x = gtx.Constraints.Max.X - w - 4
+	}
+	if x < 0 {
+		x = 0
+	}
+	if y < 0 {
+		y = s.CursorPos.Y + 12
+	}
+
+	off := op.Offset(image.Pt(x, y)).Push(gtx.Ops)
+	paint.FillShape(gtx.Ops, nightStatusBg, clip.Rect{Max: image.Pt(w, h)}.Op())
+	layout.Inset{Left: unit.Dp(pad), Right: unit.Dp(pad), Top: unit.Dp(pad), Bottom: unit.Dp(pad)}.Layout(gtx, func(gtx C) D {
+		labelOps.Add(gtx.Ops)
+		return D{Size: md.Size}
 	})
+	off.Pop()
+
+	return D{Size: image.Pt(w, h)}
 }
 
 func (s *UIState) LayoutRow(gtx C, th *material.Theme, i int) D {
@@ -53,6 +195,7 @@ func (s *UIState) LayoutRow(gtx C, th *material.Theme, i int) D {
 
 	// 1. Process drag events first (handler was registered in the previous frame)
 	s.processRowDrag(gtx, row)
+	s.processRowHover(gtx, row, i)
 
 	// 2. Lay out the content, recording its ops
 	m := op.Record(gtx.Ops)
@@ -63,9 +206,19 @@ func (s *UIState) LayoutRow(gtx C, th *material.Theme, i int) D {
 	//    so buttons/checkbox (children) take pointer priority.
 	defer clip.Rect(image.Rectangle{Max: dims.Size}).Push(gtx.Ops).Pop()
 	row.Drag.Add(gtx.Ops)
+	row.Hover.Add(gtx.Ops)
 	contentOps.Add(gtx.Ops)
 
 	return dims
+}
+
+func (s *UIState) processRowHover(gtx C, row *FileRow, i int) {
+	row.Hovered = row.Hover.Update(gtx.Source)
+	if row.Hovered {
+		s.HoveredRow = i
+	} else if s.HoveredRow == i {
+		s.HoveredRow = -1
+	}
 }
 
 func (s *UIState) processRowDrag(gtx C, row *FileRow) {
@@ -87,28 +240,28 @@ func (s *UIState) processRowDrag(gtx C, row *FileRow) {
 					dy = -dy
 				}
 				if dy >= dragThreshold && s.X11Window != 0 && s.X11Display != nil && !dragActive {
-				dragCtx.Pressed = false
-				dragCtx.Dragged = true
-				dragActive = true
-				uris := s.CheckedURIs()
-				if len(uris) == 0 {
-					uris = []string{"file://" + row.Result.Path}
+					dragCtx.Pressed = false
+					dragCtx.Dragged = true
+					dragActive = true
+					uris := s.CheckedURIs()
+					if len(uris) == 0 {
+						uris = []string{row.Result.Path}
+					}
+					os.Stderr.WriteString("zen-dragon: starting XDnD drag with " + itoa(len(uris)) + " files\n")
+					// Synchronous on Gio's own connection: blocks the frame
+					// loop for the duration of the drag (modal, like dragon).
+					dnd.StartDrag(s.X11Display, s.X11Window, uris)
+					dragActive = false
+					// Hard-reset both Gio's gesture state and our own bookkeeping.
+					// The C side now replays foreign events via XPutBackEvent, but
+					// gesture.Drag may still hold a stale pointer-tag from the
+					// pre-drag Press that survived the XDnD session; clearing it
+					// here guarantees a clean slate on the next frame.
+					row.Drag = gesture.Drag{}
+					dragCtx = dragState{}
+					gtx.Execute(op.InvalidateCmd{})
 				}
-				os.Stderr.WriteString("zen-dragon: starting XDnD drag with " + itoa(len(uris)) + " files\n")
-				// Synchronous on Gio's own connection: blocks the frame
-				// loop for the duration of the drag (modal, like dragon).
-				dnd.StartDrag(s.X11Display, s.X11Window, uris)
-				dragActive = false
-				// Hard-reset both Gio's gesture state and our own bookkeeping.
-				// The C side now replays foreign events via XPutBackEvent, but
-				// gesture.Drag may still hold a stale pointer-tag from the
-				// pre-drag Press that survived the XDnD session; clearing it
-				// here guarantees a clean slate on the next frame.
-				row.Drag = gesture.Drag{}
-				dragCtx = dragState{}
-				gtx.Execute(op.InvalidateCmd{})
 			}
-		}
 		case pointer.Release:
 			if dragCtx.Pressed && dragCtx.Tag == row && !dragCtx.Dragged {
 				row.Checkbox.Value = !row.Checkbox.Value
@@ -149,11 +302,7 @@ func (s *UIState) layoutRowContent(gtx C, th *material.Theme, row *FileRow, i in
 						return ch.Layout(gtx)
 					}),
 					layout.Flexed(1, func(gtx C) D {
-						path := row.Result.Path
-						if len(path) > 70 {
-							path = path[:33] + "..." + path[len(path)-34:]
-						}
-						lb := material.Body2(th, path)
+						lb := material.Body2(th, row.Result.Name)
 						lb.TextSize = unit.Sp(12)
 						lb.MaxLines = 1
 						lb.Color = nightText
@@ -175,7 +324,7 @@ func (s *UIState) layoutRowContent(gtx C, th *material.Theme, row *FileRow, i in
 					}),
 					layout.Rigid(func(gtx C) D {
 						if row.CopyContent.Clicked(gtx) {
-							s.copyURI("file://" + row.Result.Path)
+							s.copyURI(row.Result.Path)
 							gtx.Execute(op.InvalidateCmd{})
 						}
 						return actionButton(th, &row.CopyContent, "Copy", gtx)

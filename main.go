@@ -7,9 +7,10 @@ import (
 	"os"
 	"runtime/debug"
 
-	"gioui.org/app"
 	"zen-dragon/internal/gui"
 	"zen-dragon/internal/search"
+
+	"gioui.org/app"
 )
 
 func main() {
@@ -19,6 +20,7 @@ func main() {
 	root := flag.String("r", ".", "Root directory to search from")
 	recursive := flag.Bool("R", false, "Search subdirectories recursively")
 	regex := flag.Bool("e", false, "Interpret pattern as regex")
+	scrollSpeed := flag.Float64("s", 5.0, "List scroll speed multiplier (1.0 = default)")
 	help := flag.Bool("h", false, "Show help")
 
 	flag.Usage = func() {
@@ -49,10 +51,11 @@ func main() {
 	}
 
 	cfg := &gui.Config{
-		Keyword:   pat,
-		Root:      *root,
-		Recursive: *recursive,
-		Regex:     *regex,
+		Keyword:     pat,
+		Root:        *root,
+		Recursive:   *recursive,
+		Regex:       *regex,
+		ScrollSpeed: *scrollSpeed,
 	}
 
 	results := make(chan search.SearchResult, 4096)

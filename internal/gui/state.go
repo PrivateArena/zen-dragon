@@ -1,12 +1,14 @@
 package gui
 
 import (
+	"image"
 	"unsafe"
+
+	"zen-dragon/internal/search"
 
 	"gioui.org/gesture"
 	"gioui.org/layout"
 	"gioui.org/widget"
-	"zen-dragon/internal/search"
 )
 
 type FileRow struct {
@@ -16,22 +18,29 @@ type FileRow struct {
 	CopyName    widget.Clickable
 	CopyContent widget.Clickable
 	Drag        gesture.Drag
+	Hover       gesture.Hover
+	Hovered     bool
 }
 
 type UIState struct {
-	Rows       []FileRow
-	ResultList layout.List
-	Searching  bool
-	MatchCount int
-	Message    string
-	ClipText   string
-	X11Window  uintptr
-	X11Display unsafe.Pointer
+	Rows           []FileRow
+	ResultList     layout.List
+	Searching      bool
+	MatchCount     int
+	Message        string
+	ClipText       string
+	X11Window      uintptr
+	X11Display     unsafe.Pointer
+	ScrollSettling bool
+	ScrollSpeed    float64
+	HoveredRow     int
+	CursorPos      image.Point
 }
 
 func NewUIState() *UIState {
 	return &UIState{
 		ResultList: layout.List{Axis: layout.Vertical},
+		HoveredRow: -1,
 	}
 }
 
@@ -66,7 +75,7 @@ func (s *UIState) CheckedURIs() []string {
 	var uris []string
 	for i := range s.Rows {
 		if s.Rows[i].Checkbox.Value {
-			uris = append(uris, "file://"+s.Rows[i].Result.Path)
+			uris = append(uris, s.Rows[i].Result.Path)
 		}
 	}
 	return uris
@@ -75,7 +84,7 @@ func (s *UIState) CheckedURIs() []string {
 func (s *UIState) AllURIs() []string {
 	uris := make([]string, len(s.Rows))
 	for i := range s.Rows {
-		uris[i] = "file://" + s.Rows[i].Result.Path
+		uris[i] = s.Rows[i].Result.Path
 	}
 	return uris
 }

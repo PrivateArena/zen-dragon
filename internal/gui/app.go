@@ -4,6 +4,8 @@ import (
 	"io"
 	"strings"
 
+	"zen-dragon/internal/search"
+
 	"gioui.org/app"
 	"gioui.org/io/clipboard"
 	"gioui.org/io/key"
@@ -12,23 +14,24 @@ import (
 	"gioui.org/op/paint"
 	"gioui.org/unit"
 	"gioui.org/widget/material"
-	"zen-dragon/internal/search"
 )
 
 type C = layout.Context
 type D = layout.Dimensions
 
 type Config struct {
-	Keyword   string
-	Root      string
-	Recursive bool
-	Regex     bool
+	Keyword     string
+	Root        string
+	Recursive   bool
+	Regex       bool
+	ScrollSpeed float64
 }
 
 func RunUI(cfg *Config, results <-chan search.SearchResult) error {
 	th := NewTheme()
 	state := NewUIState()
 	state.Searching = true
+	state.ScrollSpeed = cfg.ScrollSpeed
 
 	w := new(app.Window)
 	w.Option(app.Title("zen-dragon: "+cfg.Keyword), app.Size(unit.Dp(900), unit.Dp(600)))
