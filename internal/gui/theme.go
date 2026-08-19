@@ -15,13 +15,15 @@ var (
 	nightStatusBg    = color.NRGBA{R: 20, G: 20, B: 20, A: 255}
 	nightStatusText  = color.NRGBA{R: 150, G: 150, B: 150, A: 255}
 	nightAccent      = color.NRGBA{R: 100, G: 150, B: 255, A: 255}
+	nightButtonBg    = color.NRGBA{R: 36, G: 96, B: 220, A: 255}
+	nightButtonFg    = color.NRGBA{R: 255, G: 255, B: 255, A: 255}
 )
 
 func NewTheme() *material.Theme {
 	th := material.NewTheme()
 	th.Bg = nightBg
 	th.Fg = nightText
-	th.ContrastBg = nightAccent
-	th.ContrastFg = nightText
+	th.ContrastBg = nightButtonBg
+	th.ContrastFg = nightButtonFg
 	return th
 }

@@ -192,7 +192,7 @@ func actionButton(th *material.Theme, clickable *widget.Clickable, label string,
 	return btn.Layout(gtx, func(gtx C) D {
 		return layout.UniformInset(unit.Dp(2)).Layout(gtx, func(gtx C) D {
 			lb := material.Label(th, unit.Sp(10), label)
-			lb.Color = nightAccent
+			lb.Color = nightButtonFg
 			return lb.Layout(gtx)
 		})
 	})
