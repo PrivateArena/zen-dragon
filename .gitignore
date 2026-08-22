@@ -41,3 +41,4 @@ _scratch/
 telemetry/
 tmp/
 src/resources/commands/
+.vscode/settings.json

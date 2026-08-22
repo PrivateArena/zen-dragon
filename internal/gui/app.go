@@ -51,6 +51,12 @@ func RunUI(cfg *Config, results <-chan search.SearchResult) error {
 
 			gtx := app.NewContext(&ops, e)
 			state.layout(gtx, th)
+			// Keep the frame loop alive while results are still streaming.
+			// Gio goes idle after the first frame otherwise, so drainResults
+			// would never run again and streamed matches would never render.
+			if state.Searching {
+				gtx.Execute(op.InvalidateCmd{})
+			}
 			e.Frame(&ops)
 		case key.Event:
 			state.HandleKeyPress(e)
