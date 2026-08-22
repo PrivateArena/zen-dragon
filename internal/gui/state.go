@@ -1,7 +1,6 @@
 package gui
 
 import (
-	"image"
 	"unsafe"
 
 	"zen-dragon/internal/search"
@@ -34,7 +33,6 @@ type UIState struct {
 	ScrollSettling bool
 	ScrollSpeed    float64
 	HoveredRow     int
-	CursorPos      image.Point
 }
 
 func NewUIState() *UIState {

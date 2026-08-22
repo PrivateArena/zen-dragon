@@ -113,5 +113,8 @@ func (s *UIState) layout(gtx C, th *material.Theme) {
 		layout.Flexed(1, func(gtx C) D {
 			return s.LayoutResults(gtx, th)
 		}),
+		layout.Rigid(func(gtx C) D {
+			return s.LayoutHoverBar(gtx, th)
+		}),
 	)
 }

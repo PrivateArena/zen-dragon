@@ -75,6 +75,9 @@ internal/
 | Update UI theme | internal/gui/theme.go |
 | Change row rendering | internal/gui/list.go, internal/gui/state.go |
 
+## Key Commits
+b65acbd8938a88b099f64155a680f266bdd4a5db - Introduce link hover tooltips and accelerated scrolling
+
 ## Dependencies
 ### Go Runtime / GUI
 | Package / Module | Role | Version |

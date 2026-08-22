@@ -7,7 +7,6 @@ import (
 	"zen-dragon/internal/dnd"
 
 	"gioui.org/gesture"
-	"gioui.org/io/event"
 	"gioui.org/io/pointer"
 	"gioui.org/layout"
 	"gioui.org/op"
@@ -22,8 +21,6 @@ const (
 	dragThreshold      float32 = 15
 	defaultScrollSpeed         = 5.0
 )
-
-var cursorTag struct{}
 
 type dragState struct {
 	Tag     *FileRow
@@ -63,17 +60,9 @@ func (s *UIState) LayoutResults(gtx C, th *material.Theme) D {
 }
 
 func (s *UIState) listArea(gtx C, th *material.Theme) D {
-	return layout.Stack{}.Layout(gtx,
-		layout.Expanded(func(gtx C) D {
-			s.trackCursor(gtx)
-			return s.ResultList.Layout(gtx, len(s.Rows), func(gtx C, i int) D {
-				return s.LayoutRow(gtx, th, i)
-			})
-		}),
-		layout.Stacked(func(gtx C) D {
-			return s.layoutTooltip(gtx, th)
-		}),
-	)
+	return s.ResultList.Layout(gtx, len(s.Rows), func(gtx C, i int) D {
+		return s.LayoutRow(gtx, th, i)
+	})
 }
 
 func (s *UIState) boostScroll(gtx C, prevFirst, prevOffset int) {
@@ -116,75 +105,31 @@ func (s *UIState) boostScroll(gtx C, prevFirst, prevOffset int) {
 	gtx.Execute(op.InvalidateCmd{})
 }
 
-func (s *UIState) trackCursor(gtx C) {
-	st := clip.Rect{Max: gtx.Constraints.Max}.Push(gtx.Ops)
-	event.Op(gtx.Ops, &cursorTag)
-	st.Pop()
-
-	for {
-		ev, ok := gtx.Event(pointer.Filter{
-			Target: &cursorTag,
-			Kinds:  pointer.Move | pointer.Enter | pointer.Leave | pointer.Scroll,
-		})
-		if !ok {
-			break
-		}
-		e, ok := ev.(pointer.Event)
-		if !ok {
-			continue
-		}
-		switch e.Kind {
-		case pointer.Move, pointer.Enter:
-			s.CursorPos = image.Pt(int(e.Position.X), int(e.Position.Y))
-		case pointer.Leave, pointer.Cancel, pointer.Scroll:
-			s.HoveredRow = -1
-		}
-	}
-}
-
-func (s *UIState) layoutTooltip(gtx C, th *material.Theme) D {
+// LayoutHoverBar renders a browser-style status bar under the result list:
+// a fixed strip at the bottom edge showing the hovered row's full path.
+// It never overlaps interactive content.
+func (s *UIState) LayoutHoverBar(gtx C, th *material.Theme) D {
+	const barH = 18
 	if s.HoveredRow < 0 || s.HoveredRow >= len(s.Rows) {
-		return D{}
+		return layout.Spacer{Height: unit.Dp(barH)}.Layout(gtx)
 	}
 	path := s.Rows[s.HoveredRow].Result.Path
-
-	const maxW = 480
-	pad := 6
-
-	lb := material.Label(th, unit.Sp(11), path)
-	lb.Color = nightButtonFg
-
-	cg := gtx
-	if cg.Constraints.Max.X > maxW {
-		cg.Constraints.Max.X = maxW
-	}
-	m := op.Record(gtx.Ops)
-	md := lb.Layout(cg)
-	labelOps := m.Stop()
-
-	w := md.Size.X + 2*pad
-	h := md.Size.Y + 2*pad
-	x := s.CursorPos.X + 12
-	y := s.CursorPos.Y - h - 4
-	if x+w > gtx.Constraints.Max.X {
-		x = gtx.Constraints.Max.X - w - 4
-	}
-	if x < 0 {
-		x = 0
-	}
-	if y < 0 {
-		y = s.CursorPos.Y + 12
-	}
-
-	off := op.Offset(image.Pt(x, y)).Push(gtx.Ops)
-	paint.FillShape(gtx.Ops, nightStatusBg, clip.Rect{Max: image.Pt(w, h)}.Op())
-	layout.Inset{Left: unit.Dp(pad), Right: unit.Dp(pad), Top: unit.Dp(pad), Bottom: unit.Dp(pad)}.Layout(gtx, func(gtx C) D {
-		labelOps.Add(gtx.Ops)
-		return D{Size: md.Size}
+	return layout.Inset{
+		Left:   unit.Dp(6),
+		Right:  unit.Dp(6),
+		Top:    unit.Dp(2),
+		Bottom: unit.Dp(2),
+	}.Layout(gtx, func(gtx C) D {
+		paint.FillShape(gtx.Ops, nightStatusBg, clip.Rect{Max: gtx.Constraints.Max}.Op())
+		lb := material.Label(th, unit.Sp(11), path)
+		lb.Color = nightButtonFg
+		lb.MaxLines = 1
+		cg := gtx
+		if cg.Constraints.Max.X > 0 {
+			cg.Constraints.Max.X -= 1 // leave room for ellipsis handling by label truncation
+		}
+		return lb.Layout(cg)
 	})
-	off.Pop()
-
-	return D{Size: image.Pt(w, h)}
 }
 
 func (s *UIState) LayoutRow(gtx C, th *material.Theme, i int) D {
